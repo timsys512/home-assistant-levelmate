@@ -325,7 +325,7 @@ lvgl:
                   widgets:
                     - label:
                         id: l_1_pp
-                        align: TOP_MID
+                        align: CENTER
                         text_align: CENTER
                         text_font: roboto_sm
                         text: "LevelMate Pro"
@@ -346,7 +346,7 @@ lvgl:
                   widgets:
                     - label:
                         id: l_1_fc
-                        align: TOP_MID
+                        align: CENTER
                         text_align: CENTER
                         text_font: roboto_sm
                         text: "RV Front"
@@ -427,7 +427,7 @@ lvgl:
                  widgets:
                    - label:
                        id: l_1_b
-                       align: TOP_MID
+                       align: CENTER
                        text_align: CENTER
                        text_font: roboto_sm
                        text: "RV Rear"
