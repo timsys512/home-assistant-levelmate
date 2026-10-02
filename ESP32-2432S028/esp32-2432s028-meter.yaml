@@ -1,0 +1,514 @@
+# ============================================================================
+# ESPHome LVGL Monitor -
+# ============================================================================
+# Device: ESP32-2432S028 (CYD - Cheap Yellow Display, 320×240)
+# ============================================================================
+
+esphome:
+  name: esphome-web-23812c
+  friendly_name: ESPHome Web 23812c
+  platformio_options:
+    board_build.flash_mode: dio
+    board_build.f_flash: 40000000L
+    board_build.f_cpu: 240000000L
+    board_build.flash_size: 4MB
+    upload_speed: 921600
+    build_unflags:
+      - "-Werror=all"
+ 
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FREERTOS_UNICORE: "n"
+      CONFIG_FREERTOS_HZ: "1000"
+      CONFIG_ESP32_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ: "240"
+      CONFIG_ESP32_DISABLE_ROM_LOG: "y"
+      CONFIG_LOG_DEFAULT_LEVEL: "3"
+      CONFIG_SPI_MASTER_IN_IRAM: "y"
+      CONFIG_SPI_SLAVE_IN_IRAM: "y"
+      CONFIG_ESP32_REV_MIN_1: "y"
+      CONFIG_ESP32_REV_MIN_FULL: "y"
+
+debug:
+  update_interval: 60s
+
+logger:
+  level: WARN
+  logs:
+    component: ERROR
+    wifi: WARN
+    api: WARN
+
+# ============================================================================
+# CONNECTIVITY
+# ============================================================================
+api:
+  encryption:
+    key: !secret ble_relay_enc
+  reboot_timeout: 15min
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Safe mode for failed OTA recovery
+safe_mode:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  min_auth_mode: WPA2
+  power_save_mode: none
+  reboot_timeout: 5min
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret wifi_password
+
+captive_portal:
+  
+# ============================================================================
+# I2C & SPI CONFIGURATION
+# ============================================================================
+   
+spi:
+  - id: spi_display
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: spi_touch
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39    
+ 
+# ============================================================================
+# OUTPUTS & LIGHTS
+# ============================================================================
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_pwm
+    frequency: 1000 Hz
+    inverted: false
+  - platform: ledc
+    pin: GPIO04
+    id: led_red
+    inverted: true
+  - platform: ledc
+    pin: GPIO17
+    id: led_blue
+    inverted: true
+  - platform: ledc
+    pin: GPIO16
+    id: led_green
+    inverted: true
+
+script:
+  - id: update_front_led
+    then:
+      - lambda: |-
+          float db = atof(id(driver_back).state.c_str());
+          float df = atof(id(driver_front).state.c_str());
+          float pb = atof(id(passenger_back).state.c_str());
+          float pf = atof(id(passenger_front).state.c_str());
+          bool all_zero = (db == 0.0f) && (df == 0.0f) && (pb == 0.0f) && (pf == 0.0f);
+          auto call = id(front_led).turn_on();
+          if (all_zero) {
+            call.set_rgb(0.0f, 1.0f, 0.0f);   // green
+          } else {
+            call.set_rgb(1.0f, 0.0f, 0.0f);   // red
+          }
+          call.perform();
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+  - platform: rgb
+    name: "Front LED"
+    id: front_led
+    restore_mode: ALWAYS_OFF
+    red: led_red
+    green: led_green
+    blue: led_blue
+
+display:
+  - platform: ili9xxx
+    id: cyd_display
+    model: ILI9341
+    spi_id: spi_display
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    dimensions:
+      width: 240
+      height: 320
+    transform:
+      swap_xy: false
+      mirror_x: false
+      mirror_y: true
+    invert_colors: false
+    auto_clear_enabled: false
+    update_interval: never   
+
+# ---- Touchscreen -----------------------------------------------------------
+touchscreen:
+  - platform: xpt2046
+    id: cyd_touch
+    spi_id: spi_touch
+    cs_pin: GPIO33
+    interrupt_pin: GPIO36
+    update_interval: 50ms
+    threshold: 400
+    # Typical calibration for this board. Adjust if taps are off.
+    calibration:
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+    transform:
+      mirror_x: false
+      mirror_y: true
+      swap_xy: false
+
+
+# ============================================================================
+# SENSORS 
+# ============================================================================
+sensor:
+  - platform: uptime
+    id: uptime_sensor
+    name: "Uptime"
+    entity_category: diagnostic
+    update_interval: 60s
+
+  - platform: wifi_signal
+    id: wifi_signal_db
+    name: "WiFi Signal"
+    entity_category: diagnostic
+    update_interval: 60s
+
+# ============================================================================
+# BINARY SENSORS
+# ============================================================================
+binary_sensor:
+  - platform: status
+    id: system_status
+    name: "System Status"
+
+# ============================================================================
+# TEXT SENSORS
+# ============================================================================
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+    ssid:
+      name: "Connected SSID"
+      entity_category: diagnostic
+    mac_address:
+      name: "MAC Address"
+      entity_category: diagnostic
+  - platform: debug
+    device:
+      name: "Device Info"
+      entity_category: diagnostic
+  - platform: homeassistant
+    id: driver_back
+    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_driver_back_corner
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: driver_back_label
+            text: !lambda 'return x.c_str();'
+        - script.execute: update_front_led  
+  - platform: homeassistant
+    id: driver_front
+    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_driver_front_corner
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: driver_front_label
+            text: !lambda 'return x.c_str();'
+        - script.execute: update_front_led    
+  - platform: homeassistant
+    id: passenger_back
+    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_passenger_back_corner
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: passenger_back_label
+            text: !lambda 'return x.c_str();'
+        - script.execute: update_front_led   
+  - platform: homeassistant
+    id: passenger_front
+    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_passenger_front_corner
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: passenger_front_label
+            text: !lambda 'return x.c_str();'
+        - script.execute: update_front_led
+# ============================================================================
+# BUTTONS
+# ============================================================================
+button:
+  - platform: restart
+    id: restart_button
+    name: "Restart"
+
+lvgl:
+  log_level: WARN
+  displays:
+    - cyd_display
+  buffer_size: 25%
+  touchscreens:
+    - touchscreen_id: cyd_touch
+  theme:
+    button:
+      bg_color: 0x000000
+      bg_opa: COVER
+      border_color: 0xFFFFFF 
+      border_width: 1
+      text_color: 0xFFFFFF 
+      checked:
+        bg_color: 0x00FF00
+        bg_grad_color: 0x008000
+        bg_opa: 45%
+  pages:
+    - id: main_page
+      bg_color: 0x000000
+      widgets:
+        - obj:
+            align: TOP_LEFT
+            x: 0
+            y: 0
+            width: 100%
+            height: 100%
+            pad_top: 0
+            pad_left: 0
+            pad_right: 0
+            pad_bottom: 0
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_opa: TRANSP
+            layout:
+              type: GRID
+              # Header rows (FRONT / BACK / FRONT LIGHT) only need a thin
+              # strip; the value rows (readings, switch) get 3x the height
+              # so the large font has room and isn't clipped.
+              grid_rows: [ FR(1), FR(1), FR(3), FR(1), FR(3) ]
+              # Only 2 columns are ever used (Driver / Passenger, or a
+              # column_span: 2 header) - a 3rd column was left empty before,
+              # which is why content didn't reach the right edge.
+              grid_columns: [ FR(1), FR(1) ]
+            widgets:
+              - obj:
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  text_color: 0xFFFFFF
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: 50%
+                  height: 100
+                  width: 100
+                  align: CENTER
+                  scrollable: false
+                  border_width: 0
+                  pad_all: 0
+                  widgets:
+                    - label:
+                        id: l_1_pp
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text: "LevelMate Pro"
+              - obj:
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  text_color: 0xFFFFFF
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: 50%
+                  height: 100
+                  width: 100
+                  align: CENTER
+                  scrollable: false
+                  border_width: 0
+                  pad_all: 0
+                  widgets:
+                    - label:
+                        id: l_1_fc
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text: "RV Front"
+              - obj:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 0
+                  text_color: 0xFFFFFF
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: 50%
+                  height: 100
+                  width: 100
+                  align: CENTER
+                  scrollable: false
+                  border_width: 0
+                  pad_all: 0
+                  widgets:
+                    - label:
+                        id: l_1_l
+                        width: 100%
+                        height: 20%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text: "Driver"
+                    - label:
+                        width: 100%
+                        height: 80%
+                        align: BOTTOM_MID
+                        id: driver_front_label
+                        text_font: roboto_xl
+                        text_align: CENTER
+                        text: "None"
+              - obj:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 1
+                  text_color: 0xFFFFFF
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: 50%
+                  height: 100
+                  width: 100
+                  align: CENTER
+                  scrollable: false
+                  border_width: 0
+                  pad_all: 0
+                  widgets:
+                    - label:
+                        id: l_2_l
+                        width: 100%
+                        height: 20%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text: "Passenger"
+                    - label:
+                        width: 100%
+                        height: 80%
+                        align: BOTTOM_MID
+                        id: passenger_front_label
+                        text_font: roboto_xl
+                        text_align: CENTER
+                        text: "None"
+              - obj:
+                 grid_cell_row_pos: 3
+                 grid_cell_column_pos: 0
+                 grid_cell_column_span: 2
+                 text_color: 0xFFFFFF
+                 grid_cell_x_align: STRETCH
+                 grid_cell_y_align: STRETCH
+                 bg_opa: 50%
+                 height: 100
+                 width: 100
+                 align: CENTER
+                 scrollable: false
+                 border_width: 0
+                 pad_all: 0
+                 widgets:
+                   - label:
+                       id: l_1_b
+                       align: TOP_MID
+                       text_align: CENTER
+                       text_font: roboto_sm
+                       text: "RV Rear"
+              - obj:
+                  grid_cell_row_pos: 4
+                  grid_cell_column_pos: 0
+                  text_color: 0xFFFFFF
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: 50%
+                  height: 100
+                  width: 100
+                  align: CENTER
+                  scrollable: false
+                  border_width: 0
+                  pad_all: 0
+                  widgets:
+                    - label:
+                        id: l_3_l
+                        width: 100%
+                        height: 20%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text: "Driver"
+                    - label:
+                        width: 100%
+                        height: 80%
+                        align: BOTTOM_MID
+                        id: driver_back_label
+                        text_font: roboto_xl
+                        text_align: CENTER
+                        text: "None"
+              - obj:
+                  grid_cell_row_pos: 4
+                  grid_cell_column_pos: 1
+                  text_color: 0xFFFFFF
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  height: 100
+                  bg_opa: 50%
+                  width: 100
+                  align: CENTER
+                  scrollable: false
+                  border_width: 0
+                  pad_all: 0
+                  widgets:
+                    - label:
+                        id: l_4_l
+                        width: 100%
+                        height: 20%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text: "Passenger"
+                    - label:
+                        width: 100%
+                        height: 80%
+                        align: BOTTOM_MID
+                        id: passenger_back_label
+                        text_font: roboto_xl
+                        text_align: CENTER
+                        text: "None"
+                          
+# ---------------------------------------------------------------------------
+# Fonts used by the page
+# ---------------------------------------------------------------------------
+font:
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700  
+    id: roboto_md
+    size: 20
+  - file: "gfonts://Roboto"
+    id: roboto_xl
+    size: 36
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700  
+    id: roboto_sm
+    size: 15
+
