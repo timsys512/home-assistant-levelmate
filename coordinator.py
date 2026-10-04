@@ -48,6 +48,7 @@ class LevelMateData:
     temperature_f: float | None = None
     corners: CornerDeltas | None = None
     connected: bool = False
+    paused: bool = False
 
 
 class LevelMateCoordinator(DataUpdateCoordinator[LevelMateData]):
@@ -78,9 +79,17 @@ class LevelMateCoordinator(DataUpdateCoordinator[LevelMateData]):
 
         self._client: BleakClient | None = None
         self.data = LevelMateData()
+        self._paused = False
 
     async def async_connect(self) -> None:
         """Connects, writes the configured parameters, and subscribes to notifications."""
+        if self._paused:
+            _LOGGER.debug(
+                "Skipping connect to LevelMate Pro %s - connection is paused "
+                "(switch is off).", self.address,
+            )
+            return
+
         ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
         )
@@ -124,6 +133,39 @@ class LevelMateCoordinator(DataUpdateCoordinator[LevelMateData]):
                 pass
             self._client = None
         self.data.connected = False
+
+    async def async_pause_connection(self) -> None:
+        """
+        Releases Home Assistant's BLE connection and keeps it released until
+        async_resume_connection() is called - e.g. so you can connect to the
+        LevelMate Pro with the official phone app instead, which otherwise
+        can't connect while Home Assistant is already holding the device's
+        single BLE connection slot (like most BLE peripherals, it only
+        supports one connected central at a time).
+        """
+        self._paused = True
+        await self.async_disconnect()
+        self.data.paused = True
+        self.async_set_updated_data(self.data)
+        _LOGGER.info(
+            "LevelMate Pro %s connection paused - safe to connect with the "
+            "official app now. Turn the switch back on here when done.",
+            self.address,
+        )
+
+    async def async_resume_connection(self) -> None:
+        """Reverses async_pause_connection() and reconnects."""
+        self._paused = False
+        self.data.paused = False
+        try:
+            await self.async_connect()
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "Could not reconnect to LevelMate Pro %s after resuming (%s). "
+                "Make sure it's no longer connected to another app, then try "
+                "the switch again.", self.address, exc,
+            )
+            self.async_set_updated_data(self.data)
 
     async def _authorize_next_write(self) -> bool:
         """
@@ -221,7 +263,13 @@ class LevelMateCoordinator(DataUpdateCoordinator[LevelMateData]):
 
     @callback
     def _handle_disconnected(self, client: BleakClient) -> None:
-        _LOGGER.warning("LevelMate Pro %s disconnected", self.address)
+        if self._paused:
+            _LOGGER.debug(
+                "LevelMate Pro %s disconnected (connection paused by switch)",
+                self.address,
+            )
+        else:
+            _LOGGER.warning("LevelMate Pro %s disconnected unexpectedly", self.address)
         self.data.connected = False
         self.async_set_updated_data(self.data)
 

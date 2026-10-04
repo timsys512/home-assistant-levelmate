@@ -184,14 +184,19 @@ class LevelMateProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> "LevelMateProOptionsFlow":
-        return LevelMateProOptionsFlow(config_entry)
+        return LevelMateProOptionsFlow()
 
 
 class LevelMateProOptionsFlow(config_entries.OptionsFlow):
-    """Lets the user change width/length/orientation/driving-side later."""
+    """
+    Lets the user change width/length/orientation/driving-side later.
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    Deliberately has NO __init__ / self.config_entry assignment: recent Home
+    Assistant versions inject `self.config_entry` automatically, and a
+    custom __init__ that tries to set it manually raises an error (seen as
+    "Config flow could not be loaded: 500 Internal Server Error") on those
+    versions. Just use the inherited `self.config_entry` directly.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

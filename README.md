@@ -18,6 +18,15 @@ your RV's width, length, and the LevelMate's physical mounting orientation
 to the device itself - the same three settings the official app's setup
 wizard asks for.
 
+It also adds a **Bluetooth Connection** switch. Most BLE devices, including
+the LevelMate Pro, only accept one connected app/hub at a time - so while
+Home Assistant is connected, the official LevelMate phone app can't connect.
+Turn this switch **off** to have Home Assistant release the connection (so
+you can open the official app), then back **on** when you're done to resume
+live sensor data here. This is intentionally not persisted across Home
+Assistant restarts - every restart reconnects normally regardless of how you
+left the switch.
+
 ## Why this exists / how it was built
 
 LogicBlue never published a protocol spec for this device. Everything in
