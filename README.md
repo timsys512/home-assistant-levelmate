@@ -151,12 +151,6 @@ write step is skipped.
 
 ## Caveats - please read
 
-- **The `AA13`/`AA14` scale factor (0.25 inch per raw count)** was confirmed
-  against one known real-world reading on the side axis, but has not yet
-  been independently cross-checked on the front axis with a clean, timing-
-  matched reference point. Treat the absolute inch values as a strong
-  working hypothesis, not a lab-calibrated guarantee, until you've checked
-  them against a few known-level and known-tilted positions yourself.
 - **Width and length are written to the device** (to match the official
   app's setup flow and because the device does store them), but based on
   everything we traced in `HomePresenter`, they do **not** currently feed
