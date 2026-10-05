@@ -2,4 +2,5 @@
     "name": "Unofficial LevelMate Pro",
     "homeassistant": "2026.6.4",
     "hacs": "2.0.5"
+    "country": ["US"]
 }
