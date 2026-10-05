@@ -1,6 +1,6 @@
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=timsys512&repository=home-assistant-levelmate&category=integration)
 
-# LevelMate Pro - Home Assistant Custom Integration
+# Unofficial LevelMate Pro - Home Assistant Custom Integration
 
 A Home Assistant custom component for the LogicBlue **LevelMate Pro** RV
 leveling sensor. Connects directly over Bluetooth LE (no app, no cloud,
