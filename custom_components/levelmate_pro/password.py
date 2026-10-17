@@ -1,8 +1,7 @@
 """
 LevelMate Pro "password" (write authorization) computation.
 
-Reverse-engineered from StringUtils.getPassword() in the official app's
-decompiled bytecode. The device requires this 4-byte value to be written to
+The device requires this 4-byte value to be written to
 the password characteristic (AA21) immediately before any "protected" write
 - install orientation (AA24), RV width (AA16), RV length (AA15), measurement
 units, road side, etc. Without it, those writes fail with
