@@ -2,11 +2,7 @@
 
 Every UUID, byte layout, and conversion formula below was reverse-engineered
 directly from the official LogicBlue "LevelMate Pro" Android app's decompiled
-bytecode (package com.logicblue.levelmateprov2) - there is no public protocol
-document for this device. See README.md in this folder for the full writeup,
-including which parts are 100% confirmed from the app's code vs. which are
-still a best-effort working hypothesis that should be cross-checked against
-your own device.
+bytecode (package com.logicblue.levelmateprov2) 
 """
 from __future__ import annotations
 
