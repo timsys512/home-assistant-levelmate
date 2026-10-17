@@ -1,12 +1,4 @@
-"""
-Pure-Python decode/reconstruction logic for the LevelMate Pro, kept separate
-from the Home Assistant plumbing so it can be unit-tested in isolation.
-
-Everything here was reverse-engineered from the official app's decompiled
-bytecode - see README.md for the full derivation and honesty notes about
-what's 100% confirmed vs. still a working hypothesis.
-"""
-from __future__ import annotations
+ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
