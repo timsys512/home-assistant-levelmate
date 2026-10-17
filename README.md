@@ -32,12 +32,9 @@ left the switch.
 ## Caveats - please read
 
 - **Width and length are written to the device** (to match the official
-  app's setup flow and because the device does store them), but based on
-  everything we traced in `HomePresenter`, they do **not** currently feed
-  into the corner-delta formula above. They may be used by some other
-  on-device feature (hitch assist, "dynamic site evaluation") that wasn't
-  reverse-engineered here. Don't expect changing them to change the four
-  corner numbers.
+  app's setup flow and because the device does store them).
+- Writes to LevelMate device may not work due to password encryption. Make sure you
+  configure the device with the Original LevelMate app prior to running this integration.
 - This is a from-scratch, unofficial integration, not affiliated with or
   supported by LogicBlue/LevelMate.
 
