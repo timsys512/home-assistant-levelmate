@@ -1,12 +1,6 @@
-# ============================================================================
-# ESPHome LVGL Monitor -
-# ============================================================================
-# Device: ESP32-2432S028 (CYD - Cheap Yellow Display, 320×240)
-# ============================================================================
-
 esphome:
-  name: esphome-web-23812c
-  friendly_name: ESPHome Web 23812c
+  name: esphome-levemlate
+  friendly_name: LevelMate Display
   platformio_options:
     board_build.flash_mode: dio
     board_build.f_flash: 40000000L
@@ -15,65 +9,81 @@ esphome:
     upload_speed: 921600
     build_unflags:
       - "-Werror=all"
- 
-esp32:
-  board: esp32dev
-  framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_FREERTOS_UNICORE: "n"
-      CONFIG_FREERTOS_HZ: "1000"
-      CONFIG_ESP32_DEFAULT_CPU_FREQ_240: "y"
-      CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ: "240"
-      CONFIG_ESP32_DISABLE_ROM_LOG: "y"
-      CONFIG_LOG_DEFAULT_LEVEL: "3"
-      CONFIG_SPI_MASTER_IN_IRAM: "y"
-      CONFIG_SPI_SLAVE_IN_IRAM: "y"
-      CONFIG_ESP32_REV_MIN_1: "y"
-      CONFIG_ESP32_REV_MIN_FULL: "y"
 
-debug:
-  update_interval: 60s
-
-logger:
-  level: WARN
-  logs:
-    component: ERROR
-    wifi: WARN
-    api: WARN
-
-# ============================================================================
-# CONNECTIVITY
-# ============================================================================
-api:
-  encryption:
-    key: !secret ble_relay_enc
-  reboot_timeout: 15min
+safe_mode:
 
 ota:
   - platform: esphome
     password: !secret ota_password
 
-# Safe mode for failed OTA recovery
-safe_mode:
+substitutions:
+  name: levelmate-esp32
+  friendly_name: "LevelMate Display"
+  levelmate_mac: !secret levelmate_mac
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  fast_connect: true
-  min_auth_mode: WPA2
-  power_save_mode: none
-  reboot_timeout: 5min
-  ap:
-    ssid: "${friendly_name} Fallback"
-    password: !secret wifi_password
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
 
-captive_portal:
-  
-# ============================================================================
-# I2C & SPI CONFIGURATION
-# ============================================================================
-   
+globals:
+  - id: lm_side_raw
+    type: int16_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: lm_front_raw
+    type: int16_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: lm_have_side
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: lm_have_front
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+    
+bluetooth_proxy:
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+ble_client:
+  - mac_address: ${levelmate_mac}
+    id: levelmate_ble
+    auto_connect: true
+
+    on_connect:
+      then:
+        - binary_sensor.template.publish:
+            id: levelmate_connected
+            state: ON
+
+    on_disconnect:
+      then:
+        - binary_sensor.template.publish:
+            id: levelmate_connected
+            state: OFF
+
+esp32_ble:
+  io_capability: keyboard_only
+  disable_bt_logs: true  # Default, saves flash
+  connection_timeout: 20s  # Default, matches client timeout
+  max_connections: 4
+
+packages:
+  common: !include common-nw.yaml
+
+api:
+  encryption:
+    key: !secret ble_relay_enc
+  reboot_timeout: 15min
+
 spi:
   - id: spi_display
     clk_pin: GPIO14
@@ -83,10 +93,7 @@ spi:
     clk_pin: GPIO25
     mosi_pin: GPIO32
     miso_pin: GPIO39    
- 
-# ============================================================================
-# OUTPUTS & LIGHTS
-# ============================================================================
+
 output:
   - platform: ledc
     pin: GPIO21
@@ -106,23 +113,6 @@ output:
     id: led_green
     inverted: true
 
-script:
-  - id: update_front_led
-    then:
-      - lambda: |-
-          float db = atof(id(driver_back).state.c_str());
-          float df = atof(id(driver_front).state.c_str());
-          float pb = atof(id(passenger_back).state.c_str());
-          float pf = atof(id(passenger_front).state.c_str());
-          bool all_zero = (db == 0.0f) && (df == 0.0f) && (pb == 0.0f) && (pf == 0.0f);
-          auto call = id(front_led).turn_on();
-          if (all_zero) {
-            call.set_rgb(0.0f, 1.0f, 0.0f);   // green
-          } else {
-            call.set_rgb(1.0f, 0.0f, 0.0f);   // red
-          }
-          call.perform();
-
 light:
   - platform: monochromatic
     output: backlight_pwm
@@ -130,7 +120,7 @@ light:
     id: backlight
     restore_mode: ALWAYS_ON
   - platform: rgb
-    name: "Front LED"
+    name: "Status LED"
     id: front_led
     restore_mode: ALWAYS_OFF
     red: led_red
@@ -155,7 +145,6 @@ display:
     auto_clear_enabled: false
     update_interval: never   
 
-# ---- Touchscreen -----------------------------------------------------------
 touchscreen:
   - platform: xpt2046
     id: cyd_touch
@@ -164,7 +153,6 @@ touchscreen:
     interrupt_pin: GPIO36
     update_interval: 50ms
     threshold: 400
-    # Typical calibration for this board. Adjust if taps are off.
     calibration:
       x_min: 280
       x_max: 3860
@@ -175,98 +163,159 @@ touchscreen:
       mirror_y: true
       swap_xy: false
 
-
-# ============================================================================
-# SENSORS 
-# ============================================================================
 sensor:
   - platform: uptime
     id: uptime_sensor
     name: "Uptime"
     entity_category: diagnostic
     update_interval: 60s
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: levelmate_ble
+    service_uuid: "0000aa10-0000-1000-8000-00805f9b34fb"
+    characteristic_uuid: "0000aa13-0000-1000-8000-00805f9b34fb"
+    id: levelmate_side_ble
+    name: "Raw Side Reading"
+    notify: true
+    update_interval: never
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    icon: mdi:axis-y-arrow
+    lambda: |-
+      if (x.size() != 2)
+        return NAN;
 
-  - platform: wifi_signal
-    id: wifi_signal_db
-    name: "WiFi Signal"
+      int16_t raw =
+          static_cast<int16_t>(
+              static_cast<uint16_t>(x[0]) |
+              (static_cast<uint16_t>(x[1]) << 8)
+          );
+
+      id(lm_side_raw) = raw;
+      id(lm_have_side) = true;
+
+      return raw * 0.25f;
+    on_value:
+      then:
+        - script.execute: calculate_levelmate
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: levelmate_ble
+    service_uuid: "0000aa10-0000-1000-8000-00805f9b34fb"
+    characteristic_uuid: "0000aa14-0000-1000-8000-00805f9b34fb"
+    id: levelmate_front_ble
+    name: "Raw Front Reading"
+    notify: true
+    update_interval: never
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    icon: mdi:axis-x-arrow
+    lambda: |-
+      if (x.size() != 2)
+        return NAN;
+
+      int16_t raw =
+          static_cast<int16_t>(
+              static_cast<uint16_t>(x[0]) |
+              (static_cast<uint16_t>(x[1]) << 8)
+          );
+
+      id(lm_front_raw) = raw;
+      id(lm_have_front) = true;
+
+      return raw * 0.25f;
+    on_value:
+      then:
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: levelmate_ble
+    service_uuid: "0000aa10-0000-1000-8000-00805f9b34fb"
+    characteristic_uuid: "0000aa20-0000-1000-8000-00805f9b34fb"
+    id: levelmate_temperature
+    name: "Temperature"
+    notify: true
+    update_interval: never
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: "°F"
+    accuracy_decimals: 1
+    lambda: |-
+      if (x.size() != 4)
+        return NAN;
+
+      uint32_t bits =
+          static_cast<uint32_t>(x[0]) |
+          (static_cast<uint32_t>(x[1]) << 8) |
+          (static_cast<uint32_t>(x[2]) << 16) |
+          (static_cast<uint32_t>(x[3]) << 24);
+
+      float value;
+      memcpy(&value, &bits, sizeof(value));
+
+      return value;
+  - platform: template
+    name: "Driver Front Corner"
+    id: driver_front
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+  - platform: template
+    name: "Passenger Front Corner"
+    id: passenger_front
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+  - platform: template
+    name: "Driver Back Corner"
+    id: driver_back
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+  - platform: template
+    name: "Passenger Back Corner"
+    id: passenger_back
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+  - platform: ble_client
+    type: rssi
+    ble_client_id: levelmate_ble
+    name: "Bluetooth RSSI"
+    update_interval: 30s
     entity_category: diagnostic
-    update_interval: 60s
 
-# ============================================================================
-# BINARY SENSORS
-# ============================================================================
+switch:
+  - platform: ble_client
+    ble_client_id: levelmate_ble
+    name: "Bluetooth Connection"
+    id: levelmate_connection
+button:
+  - platform: safe_mode
+    name: "Safe Mode"
 binary_sensor:
   - platform: status
     id: system_status
     name: "System Status"
-
-# ============================================================================
-# TEXT SENSORS
-# ============================================================================
+  - platform: template
+    name: "Connected"
+    id: levelmate_connected
+    device_class: connectivity
+    
 text_sensor:
-  - platform: wifi_info
-    ip_address:
-      name: "IP Address"
-      entity_category: diagnostic
-    ssid:
-      name: "Connected SSID"
-      entity_category: diagnostic
-    mac_address:
-      name: "MAC Address"
-      entity_category: diagnostic
-  - platform: debug
-    device:
-      name: "Device Info"
-      entity_category: diagnostic
-  - platform: homeassistant
-    id: driver_back
-    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_driver_back_corner
-    on_value:
-      then:
-        - lvgl.label.update:
-            id: driver_back_label
-            text: !lambda 'return x.c_str();'
-        - script.execute: update_front_led  
-  - platform: homeassistant
-    id: driver_front
-    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_driver_front_corner
-    on_value:
-      then:
-        - lvgl.label.update:
-            id: driver_front_label
-            text: !lambda 'return x.c_str();'
-        - script.execute: update_front_led    
-  - platform: homeassistant
-    id: passenger_back
-    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_passenger_back_corner
-    on_value:
-      then:
-        - lvgl.label.update:
-            id: passenger_back_label
-            text: !lambda 'return x.c_str();'
-        - script.execute: update_front_led   
-  - platform: homeassistant
-    id: passenger_front
-    entity_id: sensor.lmpr18afa_d8_fa_66_28_e2_8a_passenger_front_corner
-    on_value:
-      then:
-        - lvgl.label.update:
-            id: passenger_front_label
-            text: !lambda 'return x.c_str();'
-        - script.execute: update_front_led
-# ============================================================================
-# BUTTONS
-# ============================================================================
-button:
-  - platform: restart
-    id: restart_button
-    name: "Restart"
+  - platform: template
+    name: "Reference Corner"
+    id: reference_corner
+    icon: mdi:axis-arrow
 
 lvgl:
   log_level: WARN
   displays:
     - cyd_display
-  buffer_size: 25%
+  buffer_size: 12%
   touchscreens:
     - touchscreen_id: cyd_touch
   theme:
@@ -299,13 +348,7 @@ lvgl:
             border_opa: TRANSP
             layout:
               type: GRID
-              # Header rows (FRONT / BACK / FRONT LIGHT) only need a thin
-              # strip; the value rows (readings, switch) get 3x the height
-              # so the large font has room and isn't clipped.
               grid_rows: [ FR(1), FR(1), FR(3), FR(1), FR(3) ]
-              # Only 2 columns are ever used (Driver / Passenger, or a
-              # column_span: 2 header) - a 3rd column was left empty before,
-              # which is why content didn't reach the right edge.
               grid_columns: [ FR(1), FR(1) ]
             widgets:
               - obj:
@@ -491,10 +534,7 @@ lvgl:
                         text_font: roboto_xl
                         text_align: CENTER
                         text: "None"
-                          
-# ---------------------------------------------------------------------------
-# Fonts used by the page
-# ---------------------------------------------------------------------------
+ 
 font:
   - file:
       type: gfonts
@@ -511,4 +551,75 @@ font:
       weight: 700  
     id: roboto_sm
     size: 15
+    
+ # ============================================================
+# LEVELMATE CALCULATION
+#
+# Port of reconstruct_corners() from the Home Assistant
+# integration.
+# ============================================================
 
+script:
+  - id: calculate_levelmate
+    mode: restart
+    then:
+      - lambda: |-
+          if (!id(lm_have_side) || !id(lm_have_front))
+            return;
+
+          const int16_t side_raw  = id(lm_side_raw);
+          const int16_t front_raw = id(lm_front_raw);
+
+          const float side_in =
+              static_cast<float>(side_raw) * 0.25f;
+
+          const float front_in =
+              static_cast<float>(front_raw) * 0.25f;
+
+          const float abs_side = fabsf(side_in);
+          const float abs_front = fabsf(front_in);
+          const float diagonal = abs_side + abs_front;
+          float df;
+          float pf;
+          float db;
+          float pb;
+          const bool high_front = front_raw < 0;
+          const bool side_positive = side_raw > 0;
+          if (high_front && side_positive) {
+            df = 0.0f;
+            pf = abs_side;
+            db = abs_front;
+            pb = diagonal;
+            id(reference_corner).publish_state(
+                "Driver Front"
+            );
+          } else if (high_front && !side_positive) {
+            pf = 0.0f;
+            df = abs_side;
+            pb = abs_front;
+            db = diagonal;
+            id(reference_corner).publish_state(
+                "Passenger Front"
+            );
+
+          } else if (!high_front && side_positive) {
+            db = 0.0f;
+            pb = abs_side;
+            df = abs_front;
+            pf = diagonal;
+            id(reference_corner).publish_state(
+                "Driver Back"
+            );
+          } else {
+            pb = 0.0f;
+            db = abs_side;
+            pf = abs_front;
+            df = diagonal;
+            id(reference_corner).publish_state(
+                "Passenger Back"
+            );
+          }
+          id(driver_front).publish_state(df);
+          id(passenger_front).publish_state(pf);
+          id(driver_back).publish_state(db);
+          id(passenger_back).publish_state(pb);
