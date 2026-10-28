@@ -422,7 +422,7 @@ lvgl:
                         id: driver_front_label
                         text_font: roboto_xl
                         text_align: CENTER
-                        text: "None"
+                        text: id(driver_front).state
               - obj:
                   grid_cell_row_pos: 2
                   grid_cell_column_pos: 1
@@ -452,7 +452,7 @@ lvgl:
                         id: passenger_front_label
                         text_font: roboto_xl
                         text_align: CENTER
-                        text: "None"
+                        text: id(passenger_front).state
               - obj:
                  grid_cell_row_pos: 3
                  grid_cell_column_pos: 0
@@ -503,7 +503,7 @@ lvgl:
                         id: driver_back_label
                         text_font: roboto_xl
                         text_align: CENTER
-                        text: "None"
+                        text: id(driver_back).state
               - obj:
                   grid_cell_row_pos: 4
                   grid_cell_column_pos: 1
@@ -533,7 +533,7 @@ lvgl:
                         id: passenger_back_label
                         text_font: roboto_xl
                         text_align: CENTER
-                        text: "None"
+                        text: id(passenger_back).state
  
 font:
   - file:
