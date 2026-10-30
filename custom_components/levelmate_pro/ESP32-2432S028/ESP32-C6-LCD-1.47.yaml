@@ -1,0 +1,619 @@
+esphome:
+  name: levelmate_display
+  friendly_name: LevelMate Display
+#  platformio_options:
+#    board_build.flash_mode: dio
+#    board_build.f_flash: 40000000L
+#    board_build.flash_size: 4MB
+#    upload_speed: 921600
+#    build_unflags:
+#      - "-Werror=all"
+  on_boot:
+    priority: -100
+    then:
+      - light.turn_on:
+          id: backlight
+          brightness: 50%
+
+esp32:
+  board: esp32-c6-devkitc-1
+  framework:
+    type: esp-idf
+
+api:
+  encryption:
+    key: !secret ble_relay_enc
+  on_client_connected:
+    - esp32_ble_tracker.start_scan:
+        continuous: true
+  on_client_disconnected:
+    - esp32_ble_tracker.stop_scan:
+
+safe_mode:
+
+packages:
+  common: !include display/common-nw.yaml
+
+logger:
+  level: DEBUG
+
+globals:
+  - id: lm_side_raw
+    type: int16_t
+    restore_value: no
+    initial_value: '0'
+  - id: lm_front_raw
+    type: int16_t
+    restore_value: no
+    initial_value: '0'
+  - id: lm_have_side
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: lm_have_front
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: go_power_rx_buffer
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+    
+esp32_ble:
+  io_capability: keyboard_only
+  max_connections: 5
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+#bluetooth_proxy:
+#  active: true
+#  connection_slots: 3
+
+
+ble_client:
+  - mac_address: !secret levelmate_mac
+    id: levelmate_ble
+    auto_connect: true
+    on_connect:
+      then:
+        - binary_sensor.template.publish:
+            id: levelmate_connected
+            state: ON
+    on_disconnect:
+      then:
+        - binary_sensor.template.publish:
+            id: levelmate_connected
+            state: OFF
+           
+spi:
+  id: spi_display
+  clk_pin: GPIO7
+  mosi_pin: GPIO6
+
+output:
+  - platform: ledc
+    pin: GPIO22
+    id: backlight_pwm
+    frequency: 1000 Hz
+    inverted: false
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+  - platform: esp32_rmt_led_strip
+    name: "Status LED"
+    id: front_led
+    pin: GPIO8
+    rgb_order: RGB
+    chipset: WS2812
+    num_leds: 1
+    restore_mode: ALWAYS_OFF
+
+display:
+  - platform: mipi_spi
+    id: cyd_display
+    model: ST7789V
+    spi_id: spi_display
+    cs_pin: GPIO14
+    dc_pin:
+      number: GPIO15
+      ignore_strapping_warning: true
+    reset_pin: GPIO21
+    dimensions:
+      width: 172
+      height: 320
+      offset_width: 34
+      offset_height: 0
+    invert_colors: true
+    auto_clear_enabled: false
+    update_interval: never
+
+sensor:
+  - platform: uptime
+    id: uptime_sensor
+    name: "Uptime"
+    entity_category: diagnostic
+    update_interval: 60s
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: levelmate_ble
+    service_uuid: "0000aa10-0000-1000-8000-00805f9b34fb"
+    characteristic_uuid: "0000aa13-0000-1000-8000-00805f9b34fb"
+    id: levelmate_side_ble
+    name: "Raw Side Reading"
+    notify: true
+    update_interval: never
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    icon: mdi:axis-y-arrow
+    lambda: |-
+      if (x.size() != 2)
+        return NAN;
+
+      int16_t raw =
+          static_cast<int16_t>(
+              static_cast<uint16_t>(x[0]) |
+              (static_cast<uint16_t>(x[1]) << 8)
+          );
+
+      id(lm_side_raw) = raw;
+      id(lm_have_side) = true;
+
+      return raw * 0.25f;
+    on_value:
+      then:
+        - if:
+            condition:
+              switch.is_on: levelmate_connection
+            then:
+              - script.execute: calculate_levelmate
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: levelmate_ble
+    service_uuid: "0000aa10-0000-1000-8000-00805f9b34fb"
+    characteristic_uuid: "0000aa14-0000-1000-8000-00805f9b34fb"
+    id: levelmate_front_ble
+    name: "Raw Front Reading"
+    notify: true
+    update_interval: never
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    icon: mdi:axis-x-arrow
+    lambda: |-
+      if (x.size() != 2)
+        return NAN;
+
+      int16_t raw =
+          static_cast<int16_t>(
+              static_cast<uint16_t>(x[0]) |
+              (static_cast<uint16_t>(x[1]) << 8)
+          );
+
+      id(lm_front_raw) = raw;
+      id(lm_have_front) = true;
+
+      return raw * 0.25f;
+    on_value:
+      then:
+        - if:
+            condition:
+              switch.is_on: levelmate_connection
+            then:
+              - script.execute: calculate_levelmate
+
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: levelmate_ble
+    service_uuid: "0000aa10-0000-1000-8000-00805f9b34fb"
+    characteristic_uuid: "0000aa20-0000-1000-8000-00805f9b34fb"
+    id: levelmate_temperature
+    name: "Temperature"
+    notify: true
+    update_interval: never
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    lambda: |-
+      if (x.size() != 4)
+        return NAN;
+
+      uint32_t bits =
+          static_cast<uint32_t>(x[0]) |
+          (static_cast<uint32_t>(x[1]) << 8) |
+          (static_cast<uint32_t>(x[2]) << 16) |
+          (static_cast<uint32_t>(x[3]) << 24);
+
+      float value;
+      memcpy(&value, &bits, sizeof(value));
+      return value;
+
+  - platform: template
+    name: "Driver Front Corner"
+    id: driver_front
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+
+  - platform: template
+    name: "Passenger Front Corner"
+    id: passenger_front
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+
+  - platform: template
+    name: "Driver Back Corner"
+    id: driver_back
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+
+  - platform: template
+    name: "Passenger Back Corner"
+    id: passenger_back
+    unit_of_measurement: "in"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:angle-acute
+
+  - platform: ble_client
+    type: rssi
+    ble_client_id: levelmate_ble
+    name: "Bluetooth RSSI"
+    update_interval: 30s
+    entity_category: diagnostic
+
+switch:
+  - platform: ble_client
+    ble_client_id: levelmate_ble
+    name: "LevelMate Bluetooth"
+    id: levelmate_connection
+
+button:
+  - platform: safe_mode
+    name: "Safe Mode"
+
+  - platform: template
+    name: "LevelMate Remove Bond"
+    entity_category: diagnostic
+    on_press:
+      - ble_client.remove_bond:
+          id: levelmate_ble
+
+binary_sensor:
+  - platform: status
+    id: system_status
+    name: "System Status"
+  - platform: template
+    name: "LevelMate Connected"
+    id: levelmate_connected
+    device_class: connectivity
+
+text_sensor:
+  - platform: template
+    name: "Reference Corner"
+    id: reference_corner
+    icon: mdi:axis-arrow
+
+lvgl:
+  rotation: 180
+  log_level: WARN
+  displays:
+    - cyd_display
+  buffer_size: 12%
+  theme:
+    button:
+      bg_color: 0x000000
+      bg_opa: COVER
+      border_color: 0xFFFFFF
+      border_width: 1
+      text_color: 0xFFFFFF
+      checked:
+        bg_color: 0x00FF00
+        bg_grad_color: 0x008000
+        bg_opa: 45%
+  pages:
+    - id: main_page
+      bg_color: 0x000000
+      widgets:
+        - obj:
+            align: TOP_LEFT
+            x: 0
+            y: 0
+            width: 100%
+            height: 100%
+            pad_all: 0
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_opa: TRANSP
+            scrollable: false
+            layout:
+              type: GRID
+              grid_rows: [36, 32, 94, 32, 126]
+              grid_columns: [86, 86]
+            widgets:
+              - obj:
+                  grid_cell_row_pos: 0
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x101820
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_1_pp
+                        align: CENTER
+                        text_align: CENTER
+                        text_font: roboto_md
+                        text_color: 0xFFFFFF
+                        text: "LevelMate Pro"
+
+              - obj:
+                  grid_cell_row_pos: 1
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x18344A
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_1_fc
+                        align: CENTER
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text_color: 0xFFFFFF
+                        text: "RV FRONT"
+
+              - obj:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x000000
+                  bg_opa: COVER
+                  border_color: 0x2F4858
+                  border_width: 1
+                  radius: 0
+                  pad_all: 2
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_1_l
+                        width: 100%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_xs
+                        text_color: 0xB8C7D1
+                        text: "DRIVER"
+                    - label:
+                        align: CENTER
+                        y: 12
+                        id: driver_front_label
+                        text_font: roboto_lg
+                        text_color: 0xFFFFFF
+                        text_align: CENTER
+                        text: "--"
+
+              - obj:
+                  grid_cell_row_pos: 2
+                  grid_cell_column_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x000000
+                  bg_opa: COVER
+                  border_color: 0x2F4858
+                  border_width: 1
+                  radius: 0
+                  pad_all: 2
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_2_l
+                        width: 100%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_xs
+                        text_color: 0xB8C7D1
+                        text: "PASSENGER"
+                    - label:
+                        align: CENTER
+                        y: 12
+                        id: passenger_front_label
+                        text_font: roboto_lg
+                        text_color: 0xFFFFFF
+                        text_align: CENTER
+                        text: "--"
+
+              - obj:
+                  grid_cell_row_pos: 3
+                  grid_cell_column_pos: 0
+                  grid_cell_column_span: 2
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x18344A
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_1_b
+                        align: CENTER
+                        text_align: CENTER
+                        text_font: roboto_sm
+                        text_color: 0xFFFFFF
+                        text: "RV REAR"
+
+              - obj:
+                  grid_cell_row_pos: 4
+                  grid_cell_column_pos: 0
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x000000
+                  bg_opa: COVER
+                  border_color: 0x2F4858
+                  border_width: 1
+                  radius: 0
+                  pad_all: 2
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_3_l
+                        width: 100%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_xs
+                        text_color: 0xB8C7D1
+                        text: "DRIVER"
+                    - label:
+                        align: CENTER
+                        y: 12
+                        id: driver_back_label
+                        text_font: roboto_lg
+                        text_color: 0xFFFFFF
+                        text_align: CENTER
+                        text: "--"
+
+              - obj:
+                  grid_cell_row_pos: 4
+                  grid_cell_column_pos: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_color: 0x000000
+                  bg_opa: COVER
+                  border_color: 0x2F4858
+                  border_width: 1
+                  radius: 0
+                  pad_all: 2
+                  scrollable: false
+                  widgets:
+                    - label:
+                        id: l_4_l
+                        width: 100%
+                        align: TOP_MID
+                        text_align: CENTER
+                        text_font: roboto_xs
+                        text_color: 0xB8C7D1
+                        text: "PASSENGER"
+                    - label:
+                        align: CENTER
+                        y: 12
+                        id: passenger_back_label
+                        text_font: roboto_lg
+                        text_color: 0xFFFFFF
+                        text_align: CENTER
+                        text: "--"
+
+font:
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700
+    id: roboto_md
+    size: 20
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 500
+    id: roboto_lg
+    size: 28
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700
+    id: roboto_sm
+    size: 15
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 500
+    id: roboto_xs
+    size: 11
+
+script:
+  - id: calculate_levelmate
+    mode: restart
+    then:
+      - lambda: |-
+          if (!id(lm_have_side) || !id(lm_have_front))
+            return;
+
+          const int16_t side_raw = id(lm_side_raw);
+          const int16_t front_raw = id(lm_front_raw);
+
+          const float side_in = static_cast<float>(side_raw) * 0.25f;
+          const float front_in = static_cast<float>(front_raw) * 0.25f;
+
+          const float abs_side = fabsf(side_in);
+          const float abs_front = fabsf(front_in);
+          const float diagonal = abs_side + abs_front;
+
+          float df;
+          float pf;
+          float db;
+          float pb;
+
+          const bool high_front = front_raw < 0;
+          const bool side_positive = side_raw > 0;
+
+          if (high_front && side_positive) {
+            df = 0.0f;
+            pf = abs_side;
+            db = abs_front;
+            pb = diagonal;
+            id(reference_corner).publish_state("Driver Front");
+          } else if (high_front && !side_positive) {
+            pf = 0.0f;
+            df = abs_side;
+            pb = abs_front;
+            db = diagonal;
+            id(reference_corner).publish_state("Passenger Front");
+          } else if (!high_front && side_positive) {
+            db = 0.0f;
+            pb = abs_side;
+            df = abs_front;
+            pf = diagonal;
+            id(reference_corner).publish_state("Driver Back");
+          } else {
+            pb = 0.0f;
+            db = abs_side;
+            pf = abs_front;
+            df = diagonal;
+            id(reference_corner).publish_state("Passenger Back");
+          }
+
+          id(driver_front).publish_state(df);
+          id(passenger_front).publish_state(pf);
+          id(driver_back).publish_state(db);
+          id(passenger_back).publish_state(pb);
+
+          lv_label_set_text(id(driver_front_label), str_sprintf("%.2f", df).c_str());
+          lv_label_set_text(id(passenger_front_label), str_sprintf("%.2f", pf).c_str());
+          lv_label_set_text(id(driver_back_label), str_sprintf("%.2f", db).c_str());
+          lv_label_set_text(id(passenger_back_label), str_sprintf("%.2f", pb).c_str());
